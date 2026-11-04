@@ -95,6 +95,16 @@ func (handler *Handler) Products(responseWriter http.ResponseWriter, request *ht
 }
 
 func (handler *Handler) WarehouseOrders(responseWriter http.ResponseWriter, request *http.Request) {
+	Api_Key := request.Header.Get("X-API-Key")
+	key, found, err := handler.apiStore.FindKey(request.Context(), Api_Key)
+	if found == false || err != nil {
+		httpx.RespondWithError(responseWriter, http.StatusUnauthorized, "missing or invalid apikey")
+		return
+	}
+	if key.Scope != "orders:read" {
+		httpx.RespondWithError(responseWriter, http.StatusForbidden, "not yours")
+		return
+	}
 	orders, err := handler.orderStore.ListAll(request.Context())
 	if err != nil {
 		handler.internalError(responseWriter, request, err)

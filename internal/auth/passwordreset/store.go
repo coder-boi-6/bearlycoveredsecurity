@@ -2,7 +2,10 @@ package passwordreset
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -31,24 +34,26 @@ func NewStore(database *sql.DB) *Store {
 }
 
 func (store *Store) Create(ctx context.Context, userID int64) (Token, error) {
+	bytesize := make([]byte, 32)
+	rand.Read(bytesize)
+	toke := hex.EncodeToString(bytesize)
 	now := store.now().UTC()
-	value := fmt.Sprintf("reset-%d-%d", userID, now.UnixNano())
-	expiresAt := now.Add(tokenTTL)
+	expiresAt := now.Add(15 * time.Minute)
 	if err := store.queries.CreatePasswordResetToken(ctx, dbgen.CreatePasswordResetTokenParams{
 		UserID:    userID,
-		TokenHash: hashToken(value),
+		TokenHash: hashToken(toke),
 		ExpiresAt: formatTimestamp(expiresAt),
 	}); err != nil {
 		return Token{}, fmt.Errorf("create password reset token: %w", err)
 	}
-	token, found, err := store.Validate(ctx, value)
+	token, found, err := store.Validate(ctx, toke)
 	if err != nil {
 		return Token{}, err
 	}
 	if !found {
 		return Token{}, errors.New("created password reset token was not found")
 	}
-	token.Value = value
+	token.Value = toke
 	return token, nil
 }
 
@@ -119,7 +124,9 @@ func (store *Store) ResetPassword(ctx context.Context, value, passwordHash strin
 }
 
 func hashToken(value string) string {
-	return value
+	newb := sha256.New()
+	newb.Write([]byte(value))
+	return hex.EncodeToString(newb.Sum(nil))
 }
 
 func formatTimestamp(timestamp time.Time) string {
