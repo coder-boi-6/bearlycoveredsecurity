@@ -3,6 +3,8 @@ package reviews
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/bootdotdev/learn-web-security/internal/accounts"
 	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
@@ -101,6 +103,9 @@ func (handler *Handler) Edit(responseWriter http.ResponseWriter, request *http.R
 	if !found {
 		return
 	}
+	if review.UserID != current.User.ID {
+		return
+	}
 	if err := handler.renderForm(responseWriter, http.StatusOK, current, review, ""); err != nil {
 		handler.internalError(responseWriter, request, err)
 	}
@@ -113,6 +118,9 @@ func (handler *Handler) Update(responseWriter http.ResponseWriter, request *http
 	}
 	review, found := handler.requireReview(responseWriter, request)
 	if !found {
+		return
+	}
+	if review.UserID != current.User.ID {
 		return
 	}
 	ratingValue, ratingErr := httpx.FormValue(request, "rating")
@@ -151,6 +159,9 @@ func (handler *Handler) Delete(responseWriter http.ResponseWriter, request *http
 	if !found {
 		return
 	}
+	if review.UserID != current.User.ID {
+		return
+	}
 	if err := handler.store.Delete(request.Context(), review.ID); err != nil {
 		handler.internalError(responseWriter, request, err)
 		return
@@ -159,6 +170,10 @@ func (handler *Handler) Delete(responseWriter http.ResponseWriter, request *http
 }
 
 func (handler *Handler) requireReview(responseWriter http.ResponseWriter, request *http.Request) (Review, bool) {
+	current, ok := handler.requireAuth(responseWriter, request)
+	if !ok {
+		return Review{}, false
+	}
 	reviewID, valid := httpx.ParseSafeInteger(request.PathValue("id"))
 	if !valid {
 		handler.reviewNotFound(responseWriter)
@@ -170,6 +185,10 @@ func (handler *Handler) requireReview(responseWriter http.ResponseWriter, reques
 		return Review{}, false
 	}
 	if !found {
+		handler.reviewNotFound(responseWriter)
+		return Review{}, false
+	}
+	if review.UserID != current.User.ID {
 		handler.reviewNotFound(responseWriter)
 		return Review{}, false
 	}
@@ -233,5 +252,9 @@ func parseRating(value string) (int64, bool) {
 }
 
 func parseBody(value string) (string, bool) {
-	return value, value != ""
+	value = strings.TrimSpace(value)
+	if value == "" || utf8.RuneCountInString(value) > 1000 {
+		return "", false
+	}
+	return value, true
 }

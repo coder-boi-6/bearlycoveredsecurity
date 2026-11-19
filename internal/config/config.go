@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 const (
@@ -36,6 +38,7 @@ type Config struct {
 	MaxPublicProductResults    int
 	ActiveEncryptionKeyVersion string
 	EncryptionKeys             map[string][32]byte
+	DownloadSigningKey         [32]byte
 }
 
 type AttackerLabConfig struct {
@@ -43,11 +46,20 @@ type AttackerLabConfig struct {
 }
 
 func Load(workingDirectory string) (Config, error) {
-	return Parse(processEnvironment(), workingDirectory)
+	ryes, err := loadValues(workingDirectory)
+	if err != nil {
+		return Config{}, err
+	}
+	return Parse(ryes, workingDirectory)
+
 }
 
 func LoadAttackerLab(workingDirectory string) (AttackerLabConfig, error) {
-	return ParseAttackerLab(processEnvironment())
+	ryes, err := loadValues(workingDirectory)
+	if err != nil {
+		return AttackerLabConfig{}, err
+	}
+	return ParseAttackerLab(ryes)
 }
 
 func Parse(environment map[string]string, workingDirectory string) (Config, error) {
@@ -58,6 +70,19 @@ func Parse(environment map[string]string, workingDirectory string) (Config, erro
 	if port > 65_535 {
 		return Config{}, errors.New("PORT must be no greater than 65535")
 	}
+	pawpal, err := requireEnvironmentVariable(environment, "PAWPAL_API_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	signkey, err := requireEnvironmentVariable(environment, "DOWNLOAD_SIGNING_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	dabyt, err := hex.DecodeString(signkey)
+	if err != nil || len(dabyt) != 32 {
+		return Config{}, fmt.Errorf("signing key must be 64 hexadecimal characters long")
+	}
+	dabyt2 := [32]byte(dabyt)
 	appOrigin, err := parseOrigin(valueOrDefault(environment, "APP_ORIGIN", defaultAppOrigin))
 	if err != nil {
 		return Config{}, err
@@ -79,7 +104,7 @@ func Parse(environment map[string]string, workingDirectory string) (Config, erro
 	}
 
 	return Config{
-		PawPalAPIKey:               "bs_test_pawpal_starter_key",
+		PawPalAPIKey:               pawpal,
 		AppOrigin:                  appOrigin,
 		Port:                       port,
 		DatabasePath:               databasePath,
@@ -89,6 +114,7 @@ func Parse(environment map[string]string, workingDirectory string) (Config, erro
 		MaxPublicProductResults:    MaxPublicProductResults,
 		ActiveEncryptionKeyVersion: activeEncryptionKeyVersion,
 		EncryptionKeys:             encryptionKeys,
+		DownloadSigningKey:         dabyt2,
 	}, nil
 }
 
@@ -101,17 +127,6 @@ func ParseAttackerLab(environment map[string]string) (AttackerLabConfig, error) 
 		return AttackerLabConfig{}, errors.New("ATTACKER_LAB_PORT must be no greater than 65535")
 	}
 	return AttackerLabConfig{Port: port}, nil
-}
-
-func processEnvironment() map[string]string {
-	environment := make(map[string]string)
-	for _, entry := range os.Environ() {
-		name, value, found := strings.Cut(entry, "=")
-		if found {
-			environment[name] = value
-		}
-	}
-	return environment
 }
 
 func valueOrDefault(environment map[string]string, name, fallback string) string {
@@ -219,4 +234,38 @@ func normalizeEncryptionVersion(version string) (string, error) {
 		}
 	}
 	return normalized, nil
+}
+
+func requireEnvironmentVariable(environment map[string]string, name string) (string, error) {
+	value := environment[name]
+	if value == "" {
+		return "", fmt.Errorf("missing required environment variable: %s", name)
+	}
+	return value, nil
+}
+
+func loadenvivar(dir string) (map[string]string, error) {
+	path := filepath.Join(dir, ".env")
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		return nil, err
+	}
+	return godotenv.Read(path)
+}
+func overlayEnv(fileValues map[string]string) map[string]string {
+	for _, ron := range os.Environ() {
+		cutt, ed, _ := strings.Cut(ron, "=")
+		fileValues[cutt] = ed
+	}
+	return fileValues
+}
+func loadValues(workingDirectory string) (map[string]string, error) {
+	mappedofstringandstring, err := loadenvivar(workingDirectory)
+	if err != nil {
+		return map[string]string{}, err
+	}
+	mergedbing := overlayEnv(mappedofstringandstring)
+	return mergedbing, nil
 }

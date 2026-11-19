@@ -25,6 +25,21 @@ type orderItemResponse struct {
 	PriceCents  int64  `json:"price_cents"`
 }
 
+type productResponse struct {
+	Id          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Image_path  string `json:"image_path"`
+	Price_cents int64  `json:"price_cents"`
+}
+
+type orderResponse struct {
+	Id          int64  `json:"id"`
+	Status      string `json:"status"`
+	Total_cents int64  `json:"total_cents"`
+	Created_at  string `json:"created_at"`
+}
+
 type Handler struct {
 	accountStore      *accounts.Store
 	orderStore        *orders.Store
@@ -51,11 +66,21 @@ func (handler *Handler) AccountOrders(responseWriter http.ResponseWriter, reques
 		handler.internalError(responseWriter, request, err)
 		return
 	}
-	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"orders": orders})
+	krill := make([]orderResponse, 0)
+	for _, order := range orders {
+		in := orderResponse{
+			Id:          order.ID,
+			Status:      order.Status,
+			Total_cents: order.TotalCents,
+			Created_at:  order.CreatedAt,
+		}
+		krill = append(krill, in)
+	}
+	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"orders": krill})
 }
 
 func (handler *Handler) Order(responseWriter http.ResponseWriter, request *http.Request) {
-	_, ok := handler.requireAuthentication(responseWriter, request)
+	current, ok := handler.requireAuthentication(responseWriter, request)
 	if !ok {
 		return
 	}
@@ -69,7 +94,13 @@ func (handler *Handler) Order(responseWriter http.ResponseWriter, request *http.
 		handler.internalError(responseWriter, request, err)
 		return
 	}
-	if !found {
+	in := orderResponse{
+		Id:          order.ID,
+		Status:      order.Status,
+		Total_cents: order.TotalCents,
+		Created_at:  order.CreatedAt,
+	}
+	if !found || current.User.ID != order.UserID {
 		httpx.RespondWithJSON(responseWriter, http.StatusNotFound, map[string]string{"error": "Order not found"})
 		return
 	}
@@ -82,16 +113,28 @@ func (handler *Handler) Order(responseWriter http.ResponseWriter, request *http.
 	for _, item := range items {
 		itemResponses = append(itemResponses, orderItemResponse{ProductID: item.ProductID, ProductName: item.ProductName, Quantity: item.Quantity, PriceCents: item.PriceCents})
 	}
-	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"order": order, "items": itemResponses})
+	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"order": in, "items": itemResponses})
 }
 
 func (handler *Handler) Products(responseWriter http.ResponseWriter, request *http.Request) {
-	products, err := handler.productStore.ListAllProducts(request.Context())
+	products, err := handler.productStore.ListProducts(request.Context(), handler.maxProductResults)
 	if err != nil {
 		handler.internalError(responseWriter, request, err)
 		return
 	}
-	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"products": products})
+	krill := make([]productResponse, 0)
+	for _, product := range products {
+		in := productResponse{
+			Id:          product.ID,
+			Name:        product.Name,
+			Description: product.Description,
+			Image_path:  product.ImagePath,
+			Price_cents: product.PriceCents,
+		}
+		krill = append(krill, in)
+	}
+	responseWriter.Header().Set("Access-Control-Allow-Origin", "*")
+	httpx.RespondWithJSON(responseWriter, http.StatusOK, map[string]any{"products": krill})
 }
 
 func (handler *Handler) WarehouseOrders(responseWriter http.ResponseWriter, request *http.Request) {
@@ -138,4 +181,10 @@ func (handler *Handler) requireAuthentication(responseWriter http.ResponseWriter
 func (handler *Handler) internalError(responseWriter http.ResponseWriter, request *http.Request, err error) {
 	_ = handler.logger.Event("unhandled_error", map[string]any{"method": request.Method, "path": request.URL.Path, "message": err.Error()})
 	httpx.RespondWithError(responseWriter, http.StatusInternalServerError, err.Error())
+}
+
+func (handler *Handler) Preflighted(responsewriter http.ResponseWriter, request *http.Request) {
+	responsewriter.Header().Set("Access-Control-Allow-Origin", "*")
+	responsewriter.Header().Set("Access-Control-Allow-Methods", "GET")
+	responsewriter.WriteHeader(http.StatusNoContent)
 }

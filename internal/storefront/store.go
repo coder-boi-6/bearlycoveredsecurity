@@ -4,21 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strconv"
 
 	"github.com/bootdotdev/learn-web-security/internal/database/dbgen"
 )
 
 type Product struct {
-	ID             int64  `json:"id"`
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	ImagePath      string `json:"image_path"`
-	PriceCents     int64  `json:"price_cents"`
-	CostCents      int64  `json:"cost_cents"`
-	InventoryCount int64  `json:"inventory_count"`
-	IsActive       bool   `json:"is_active"`
-	CreatedAt      string `json:"created_at"`
+	ID             int64
+	Name           string
+	Description    string
+	ImagePath      string
+	PriceCents     int64
+	CostCents      int64
+	InventoryCount int64
+	IsActive       bool
+	CreatedAt      string
 }
 
 type Review struct {
@@ -51,30 +50,30 @@ func (store *Store) ListProducts(ctx context.Context, maxResults int64) ([]Produ
 }
 
 func (store *Store) SearchProducts(ctx context.Context, query string, maxResults int64) ([]Product, error) {
-	searchSQL := `SELECT id, name, description, image_path, price_cents, cost_cents, inventory_count, is_active, created_at
-		FROM products
-		WHERE is_active = 1 AND (name LIKE '%` + query + `%' OR description LIKE '%` + query + `%')
-		ORDER BY id
-		LIMIT ` + strconv.FormatInt(maxResults, 10)
-	rows, err := store.database.QueryContext(ctx, searchSQL)
-	if err != nil {
-		return nil, fmt.Errorf("search products: %w", err)
+	ducts, err := store.queries.SearchActiveProducts(ctx, dbgen.SearchActiveProductsParams{
+		Pattern:    "%" + query + "%",
+		MaxResults: maxResults,
+	})
+	products := make([]Product, 0, len(ducts))
+	for _, duct := range ducts {
+		product := Product{
+			ID:             duct.ID,
+			Name:           duct.Name,
+			Description:    duct.Description,
+			ImagePath:      duct.ImagePath,
+			PriceCents:     duct.PriceCents,
+			CostCents:      duct.CostCents,
+			InventoryCount: duct.InventoryCount,
+			CreatedAt:      duct.CreatedAt,
+		}
+		if duct.IsActive == 1 {
+			product.IsActive = true
+		} else {
+			product.IsActive = false
+		}
+		products = append(products, product)
 	}
-	defer rows.Close()
-	return scanProducts(rows)
-}
-
-func (store *Store) ListAllProducts(ctx context.Context) ([]Product, error) {
-	rows, err := store.database.QueryContext(ctx, `
-		SELECT id, name, description, image_path, price_cents, cost_cents, inventory_count, is_active, created_at
-		FROM products
-		ORDER BY id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("list all products: %w", err)
-	}
-	defer rows.Close()
-	return scanProducts(rows)
+	return products, err
 }
 
 func (store *Store) FindProduct(ctx context.Context, productID int64) (Product, bool, error) {

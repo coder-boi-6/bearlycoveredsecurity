@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -29,39 +30,9 @@ func applyMiddleware(handler http.Handler, middlewareChain ...middleware) http.H
 	return handler
 }
 
-func nosniff (next http.Handler) http.Handler {
-	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request){
+func nosniff(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		responseWriter.Header().Set("X-Content-Type-Options", "nosniff")
-		next.ServeHTTP(responseWriter, request)
-	})
-}
-
-func permissiveCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
-		if origin := request.Header.Get("Origin"); origin != "" {
-			responseWriter.Header().Set("Access-Control-Allow-Origin", origin)
-			responseWriter.Header().Set("Access-Control-Allow-Credentials", "true")
-			responseWriter.Header().Set("Vary", "Origin")
-		}
-		if request.Method == http.MethodOptions {
-			responseWriter.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			responseWriter.Header().Set("Access-Control-Allow-Headers", request.Header.Get("Access-Control-Request-Headers"))
-			responseWriter.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(responseWriter, request)
-	})
-}
-
-func cspNonce(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
-		nonceBytes := make([]byte, 16)
-		if _, err := rand.Read(nonceBytes); err != nil {
-			http.Error(responseWriter, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		nonce := base64.StdEncoding.EncodeToString(nonceBytes)
-		request = request.WithContext(httpx.WithCSPNonce(request.Context(), nonce))
 		next.ServeHTTP(responseWriter, request)
 	})
 }
@@ -247,4 +218,58 @@ func boolToInt64(value bool) int64 {
 		return 1
 	}
 	return 0
+}
+
+func dontellmewhattodomiddleware(origin string, rend *templates.Renderer) middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			orangine := r.Header.Get("Origin")
+			if orangine == "" {
+				orangine = r.Header.Get("Referer")
+				if parsed, err := url.Parse(orangine); err != nil {
+					httpx.RespondWithErrorPage(w, rend, http.StatusForbidden, "Forbidden", "")
+					return
+				} else if orangine = parsed.Scheme + "://" + parsed.Host; orangine != origin {
+					httpx.RespondWithErrorPage(w, rend, http.StatusForbidden, "Forbidden", "")
+					return
+				}
+			}
+			if orangine != origin {
+				httpx.RespondWithErrorPage(w, rend, http.StatusForbidden, "Forbidden", "")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonceBytes := make([]byte, 16)
+		if _, err := rand.Read(nonceBytes); err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		nonce := base64.StdEncoding.EncodeToString(nonceBytes)
+		request := r.WithContext(httpx.WithCSPNonce(r.Context(), nonce))
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'nonce-"+nonce+"'; style-src 'self'; img-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		if r.URL.Path == "/shipping-widget.css" || r.URL.Path == "/shipping-widget.js" {
+			w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+		}
+		w.Header().Set("Origin-Agent-Cluster", "?1")
+		w.Header().Set("X-DNS-Prefetch-Control", "off")
+		w.Header().Set("X-Download-Options", "noopen")
+		w.Header().Set("X-Permitted-Cross-Domain-Policies", "none")
+		w.Header().Set("X-XSS-Protection", "0")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, request)
+	})
 }
