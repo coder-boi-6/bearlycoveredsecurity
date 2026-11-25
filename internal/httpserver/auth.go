@@ -10,6 +10,7 @@ import (
 	"github.com/bootdotdev/learn-web-security/internal/auth/mfa"
 	"github.com/bootdotdev/learn-web-security/internal/auth/passwordreset"
 	"github.com/bootdotdev/learn-web-security/internal/auth/passwords"
+	"github.com/bootdotdev/learn-web-security/internal/auth/returnto"
 	"github.com/bootdotdev/learn-web-security/internal/auth/sessions"
 	"github.com/bootdotdev/learn-web-security/internal/httpx"
 	"github.com/bootdotdev/learn-web-security/internal/logging"
@@ -293,7 +294,8 @@ func safeReturnTo(value string) string {
 	if value == "" {
 		return "/"
 	}
-	return value
+	dwing := returnto.Safe(value)
+	return dwing
 }
 
 func nullableUserID(user accounts.User, found bool) any {
